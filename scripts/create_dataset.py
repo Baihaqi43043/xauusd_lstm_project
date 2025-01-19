@@ -22,8 +22,8 @@ def create_sequences(data, n_steps):
 n_steps = 180  # Gunakan 180 candle terakhir untuk prediksi
 X, y = create_sequences(data, n_steps)
 
-# Split Data (78% Training, 22% Testing)
-split = int(len(X) * 0.78)
+# Split Data (92% Training, 8% Testing)
+split = int(len(X) * 0.92)
 X_train, X_test, y_train, y_test = X[:split], X[split:], y[:split], y[split:]
 
 # Simpan dataset

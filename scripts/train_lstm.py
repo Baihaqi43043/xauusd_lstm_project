@@ -65,7 +65,7 @@ print("\nMemulai training model...")
 history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
-    epochs=50,
+    epochs=5,
     batch_size=64,  # Batch size lebih besar untuk GPU
     callbacks=[checkpoint, early_stopping],
     verbose=1
