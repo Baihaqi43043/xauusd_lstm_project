@@ -1,0 +1,6 @@
+MetaTrader5==5.0.4803
+pandas==2.2.3
+ta==0.11.0
+scikit-learn==1.2.2
+matplotlib==3.7.2
+deap==1.3.1

@@ -8,6 +8,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 # Load model
 model = tf.keras.models.load_model("lstm_goldusd_paper.h5")
+# model = tf.keras.models.load_model("models/best_model.h5")
 
 # Load dataset testing
 data = np.load("lstm_dataset.npz")

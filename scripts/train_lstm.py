@@ -1,8 +1,34 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 import os
+import math
+from sklearn.preprocessing import MinMaxScaler
+import joblib
+import matplotlib.pyplot as plt
+
+def get_one_cycle_lr(epochs, max_lr, steps_per_epoch, div_factor=25.):
+    initial_learning_rate = max_lr / div_factor
+    final_learning_rate = initial_learning_rate / 1000
+
+    # Menghitung total steps
+    total_steps = epochs * steps_per_epoch
+    step_size = total_steps // 2  # Setengah siklus untuk naik, setengah untuk turun
+
+    def one_cycle_lr(step):
+        # Convert step ke dalam range [0,1]
+        cycle = math.floor(1 + step / (2 * step_size))
+        x = abs(step / step_size - 2 * cycle + 1)
+
+        if step <= step_size:
+            # Fase naik
+            return initial_learning_rate + (max_lr - initial_learning_rate) * (1 - x)
+        else:
+            # Fase turun
+            return final_learning_rate + (max_lr - final_learning_rate) * x
+
+    return tf.keras.callbacks.LearningRateScheduler(one_cycle_lr)
 
 # Konfigurasi GPU
 print("Mengecek GPU yang tersedia...")
@@ -22,24 +48,40 @@ else:
 
 # Load dataset yang sudah diproses
 data = np.load("lstm_dataset.npz")
-X_train, X_test, y_train, y_test = data["X_train"], data["X_test"], data["y_train"], data["y_test"]
+X_train, X_test, X_holdout = data["X_train"], data["X_test"], data["X_holdout"]
+y_train, y_test, y_holdout = data["y_train"], data["y_test"], data["y_holdout"]
 
-# Bentuk data
-print(f"\n✅ Bentuk data training: {X_train.shape}")
-print(f"✅ Bentuk data testing: {X_test.shape}")
+# Pastikan y_train dan y_test memiliki bentuk yang sesuai untuk multi-output
+print(f"\n✅ Bentuk data training: X_train: {X_train.shape}, y_train: {y_train.shape}")
+print(f"✅ Bentuk data testing: X_test: {X_test.shape}, y_test: {y_test.shape}")
+print(f"✅ Bentuk data holdout: X_holdout: {X_holdout.shape}, y_holdout: {y_holdout.shape}")
 
-# Model LSTM berdasarkan paper
+# Memuat scaler yang digunakan selama preprocessing
+scaler_features = joblib.load("scaler_features.pkl")
+
+# Menentukan jumlah fitur output
+n_features_output = y_train.shape[1]  # Harus sama dengan jumlah fitur yang diprediksi
+
+# Model LSTM untuk forecasting multi-feature
 model = Sequential([
     LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+    BatchNormalization(),
     Dropout(0.2),
     LSTM(50, return_sequences=False),
+    BatchNormalization(),
     Dropout(0.2),
     Dense(25, activation='relu'),
-    Dense(1)
+    Dense(n_features_output)  # Menyesuaikan jumlah unit dengan jumlah fitur output
 ])
 
+# Hyperparameters untuk OneCycle LR
+BATCH_SIZE = 32
+EPOCHS = 25
+MAX_LR = 0.01
+steps_per_epoch = len(X_train) // BATCH_SIZE
+
 # Compile model dengan optimizer yang dioptimalkan
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.0005)
+optimizer = tf.keras.optimizers.Adam()
 model.compile(optimizer=optimizer, loss="mean_squared_error", metrics=['mae'])
 
 # Callback untuk menyimpan model terbaik
@@ -56,18 +98,21 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(
 # Early stopping untuk menghentikan training jika tidak ada improvement
 early_stopping = tf.keras.callbacks.EarlyStopping(
     monitor='val_loss',
-    patience=5,
+    patience=10,
     restore_best_weights=True
 )
 
-# Train model dengan batch size yang lebih besar untuk GPU
-print("\nMemulai training model...")
+# Buat OneCycle learning rate scheduler
+one_cycle = get_one_cycle_lr(EPOCHS, MAX_LR, steps_per_epoch)
+
+# Train model dengan OneCycle LR
+print("\nMemulai training model dengan OneCycle Learning Rate...")
 history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
-    epochs=5,
-    batch_size=64,  # Batch size lebih besar untuk GPU
-    callbacks=[checkpoint, early_stopping],
+    epochs=EPOCHS,
+    batch_size=BATCH_SIZE,
+    callbacks=[checkpoint, early_stopping, one_cycle],
     verbose=1
 )
 
@@ -77,3 +122,22 @@ model.save("lstm_goldusd_paper.h5")
 print("\n✅ Training selesai!")
 print("✅ Model terbaik disimpan di models/best_model.h5")
 print("✅ Model final disimpan sebagai lstm_goldusd_paper.h5")
+
+# (Opsional) Plotting History
+plt.figure(figsize=(12, 6))
+plt.plot(history.history['loss'], label='Training Loss (MSE)')
+plt.plot(history.history['val_loss'], label='Validation Loss (MSE)')
+plt.title('Loss Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss (MSE)')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(history.history['mae'], label='Training MAE')
+plt.plot(history.history['val_mae'], label='Validation MAE')
+plt.title('MAE Over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('MAE')
+plt.legend()
+plt.show()
